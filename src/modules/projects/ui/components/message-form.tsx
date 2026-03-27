@@ -52,8 +52,11 @@ const MessageForm = ({ projectId }: MessageFormProps) => {
         if (error.data?.code === "TOO_MANY_REQUESTS") {
           router.push("/pricing");
         }
-
-        toast.error(error.message);
+        if (error.data?.code === "CONFLICT") {
+          toast.error("Generation already running. Cancel or wait for completion.");
+          return;
+        }
+        toast.error(error.message || "Failed to start generation.");
       },
     })
   );

@@ -1,10 +1,14 @@
 import { z } from "zod";
 
-import { inngest } from "@/inngest/client";
+import { AppError, ERROR_CODES, toTRPCError } from "@/lib/errors";
+import { dispatchCodeAgentRun } from "@/lib/inngest-dispatch";
+import { log } from "@/lib/logger";
 import prisma from "@/lib/prisma";
+import { getMaxActiveRunsPerUser } from "@/lib/run-policy";
+import { expireStaleRunsForUser } from "@/lib/runs";
 import { consumeCredits } from "@/lib/usage";
+import { writeAuditLog } from "@/lib/audit";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { TRPCError } from "@trpc/server";
 
 export const messagesRouter = createTRPCRouter({
   getMany: protectedProcedure
@@ -42,6 +46,8 @@ export const messagesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
+      await expireStaleRunsForUser(ctx.auth.userId, input.projectId);
+
       const existingProject = await prisma.project.findUnique({
         where: {
           id: input.projectId,
@@ -50,29 +56,91 @@ export const messagesRouter = createTRPCRouter({
       });
 
       if (!existingProject) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Project not found",
-        });
+        throw toTRPCError(
+          new AppError(ERROR_CODES.PROJECT_NOT_FOUND, "Project not found")
+        );
       }
 
       try {
         await consumeCredits();
       } catch (error) {
-        if (error instanceof Error) {
-          console.error("[messages.create] consumeCredits:", error);
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message:
-              process.env.NODE_ENV === "development"
-                ? error.message
-                : "Something went wrong.",
-          });
-        }
-        throw new TRPCError({
-          code: "TOO_MANY_REQUESTS",
-          message: "You ran out of credits",
+        log({
+          level: "warn",
+          message: "messages.create consumeCredits failed",
+          requestId: ctx.requestId,
+          userId: ctx.auth.userId,
+          projectId: input.projectId,
+          code:
+            error instanceof AppError
+              ? error.code
+              : ERROR_CODES.USAGE_CONFIGURATION_ERROR,
+          error,
         });
+        throw toTRPCError(error);
+      }
+
+      const activeRun = await prisma.jobRun.findFirst({
+        where: {
+          projectId: existingProject.id,
+          userId: ctx.auth.userId,
+          status: {
+            in: ["PENDING", "RUNNING"],
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (activeRun) {
+        throw toTRPCError(
+          new AppError(
+            ERROR_CODES.RUN_ALREADY_ACTIVE,
+            "A generation is already running for this project. Please wait or cancel it first."
+          )
+        );
+      }
+
+      const activeRunsForUser = await prisma.jobRun.count({
+        where: {
+          userId: ctx.auth.userId,
+          status: { in: ["PENDING", "RUNNING"] },
+        },
+      });
+      if (activeRunsForUser >= getMaxActiveRunsPerUser()) {
+        throw toTRPCError(
+          new AppError(
+            ERROR_CODES.RUN_ALREADY_ACTIVE,
+            "Global active run limit reached. Please wait for current runs to finish."
+          )
+        );
+      }
+
+      const recentSameInputRun = await prisma.jobRun.findFirst({
+        where: {
+          projectId: existingProject.id,
+          userId: ctx.auth.userId,
+          input: input.value,
+          createdAt: {
+            gt: new Date(Date.now() - 90_000),
+          },
+          status: {
+            in: ["PENDING", "RUNNING", "SUCCEEDED"],
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (recentSameInputRun) {
+        const existingMessage = await prisma.message.findFirst({
+          where: {
+            projectId: existingProject.id,
+            role: "USER",
+            content: input.value,
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (existingMessage) {
+          return existingMessage;
+        }
       }
 
       const createdMessage = await prisma.message.create({
@@ -81,15 +149,77 @@ export const messagesRouter = createTRPCRouter({
           content: input.value,
           role: "USER",
           type: "RESULT",
+          runStatus: "PENDING",
         },
       });
 
-      await inngest.send({
-        name: "code-agent/run",
+      const createdRun = await prisma.jobRun.create({
         data: {
+          projectId: existingProject.id,
+          userId: ctx.auth.userId,
+          input: input.value,
+          status: "PENDING",
+          promptVersion: "v1",
+          messages: {
+            connect: {
+              id: createdMessage.id,
+            },
+          },
+        },
+      });
+
+      await prisma.message.update({
+        where: { id: createdMessage.id },
+        data: { runId: createdRun.id },
+      });
+
+      try {
+        await dispatchCodeAgentRun({
           value: input.value,
           projectId: existingProject.id,
-        },
+          runId: createdRun.id,
+          userId: ctx.auth.userId,
+          requestId: ctx.requestId,
+        });
+      } catch (error) {
+        await prisma.jobRun.update({
+          where: { id: createdRun.id },
+          data: {
+            status: "FAILED",
+            errorCode: ERROR_CODES.INNGEST_DISPATCH_FAILED,
+            errorMessage: "Dispatch failed before execution",
+            finishedAt: new Date(),
+          },
+        });
+        await prisma.message.update({
+          where: { id: createdMessage.id },
+          data: {
+            runStatus: "FAILED",
+          },
+        });
+        log({
+          level: "error",
+          message: "Failed to dispatch Inngest event",
+          requestId: ctx.requestId,
+          userId: ctx.auth.userId,
+          projectId: existingProject.id,
+          code: ERROR_CODES.INNGEST_DISPATCH_FAILED,
+          error,
+        });
+        throw toTRPCError(
+          new AppError(
+            ERROR_CODES.INNGEST_DISPATCH_FAILED,
+            error instanceof Error ? error.message : "AI job dispatch failed. Please try again.",
+            error,
+          ),
+        );
+      }
+
+      await writeAuditLog({
+        actorId: ctx.auth.userId,
+        action: "message.created",
+        resourceId: createdMessage.id,
+        metadata: { runId: createdRun.id, projectId: existingProject.id },
       });
 
       return createdMessage;

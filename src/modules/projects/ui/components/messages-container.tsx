@@ -1,34 +1,96 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
-import { Fragment } from "@/generated/prisma";
+import { Fragment, RunStatus } from "@/generated/prisma";
 import { useTRPC } from "@/trpc/client";
 import { MessageCard } from "./message-card";
 import { MessageForm } from "./message-form";
 import { MessageLoading } from "./message-loading";
+import { RunStatusBanner } from "./run-status-banner";
 
 interface MessagesContainerProps {
   projectId: string;
   activeFragment: Fragment | null;
   setActiveFragment: (activeFragment: Fragment | null) => void;
+  effectiveRun: {
+    id: string;
+    status: RunStatus;
+    errorMessage?: string | null;
+  } | null;
 }
 
 const MessagesContainer = ({
   activeFragment,
+  effectiveRun,
   projectId,
   setActiveFragment,
 }: MessagesContainerProps) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastAssistantMessageIdRef = useRef<string | null>(null);
+  const lastHandledTerminalRunIdRef = useRef<string | null>(null);
 
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  const isRunActive =
+    effectiveRun?.status === "PENDING" || effectiveRun?.status === "RUNNING";
+
   const { data: messages } = useQuery(
-    trpc.messages.getMany.queryOptions({ projectId }, { refetchInterval: 5000 })
+    trpc.messages.getMany.queryOptions(
+      { projectId },
+      {
+        refetchOnWindowFocus: true,
+        staleTime: 2000,
+        refetchInterval: isRunActive ? 2500 : false,
+      },
+    ),
+  );
+
+  const cancelRun = useMutation(
+    trpc.jobs.cancel.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries(
+          trpc.jobs.latestForProject.queryOptions({ projectId }),
+        );
+        queryClient.invalidateQueries(
+          trpc.messages.getMany.queryOptions({ projectId }),
+        );
+      },
+    }),
+  );
+  const retryRun = useMutation(
+    trpc.jobs.retry.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries(
+          trpc.jobs.latestForProject.queryOptions({ projectId }),
+        );
+        queryClient.invalidateQueries(
+          trpc.messages.getMany.queryOptions({ projectId }),
+        );
+      },
+    }),
   );
 
   useEffect(() => {
+    if (!effectiveRun?.id) return;
+    const terminal =
+      effectiveRun.status === "SUCCEEDED" ||
+      effectiveRun.status === "FAILED" ||
+      effectiveRun.status === "CANCELLED";
+    if (!terminal) return;
+    if (lastHandledTerminalRunIdRef.current === effectiveRun.id) return;
+    lastHandledTerminalRunIdRef.current = effectiveRun.id;
+    void queryClient.invalidateQueries(
+      trpc.messages.getMany.queryOptions({ projectId }),
+    );
+    void queryClient.invalidateQueries(
+      trpc.jobs.latestForProject.queryOptions({ projectId }),
+    );
+  }, [effectiveRun, projectId, queryClient, trpc]);
+
+  useEffect(() => {
     const lastAssistantMessage = messages?.findLast(
-      (message) => message.role === "ASSISTANT"
+      (message) => message.role === "ASSISTANT",
     );
 
     if (
@@ -44,8 +106,8 @@ const MessagesContainer = ({
     bottomRef.current?.scrollIntoView();
   }, [messages?.length]);
 
-  const lastMessage = messages?.[messages?.length - 1];
-  const isLastMessageUser = lastMessage?.role === "USER";
+  const isLastMessageUser =
+    effectiveRun?.status === "PENDING" || effectiveRun?.status === "RUNNING";
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -65,6 +127,14 @@ const MessagesContainer = ({
           ))}
 
           {isLastMessageUser && <MessageLoading />}
+          <RunStatusBanner
+            runId={effectiveRun?.id}
+            status={effectiveRun?.status}
+            errorMessage={effectiveRun?.errorMessage}
+            onCancel={(runId) => cancelRun.mutate({ runId })}
+            onRetry={(runId) => retryRun.mutate({ runId })}
+            busy={cancelRun.isPending || retryRun.isPending}
+          />
 
           <div ref={bottomRef} />
         </div>

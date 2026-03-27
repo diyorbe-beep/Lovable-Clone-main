@@ -15,14 +15,21 @@ datasource db {
 }
 
 model Project {
-  id String @id @default(uuid())
-  name String
-  userId String
+  id          String  @id @default(uuid())
+  name        String
+  userId      String
+  workspaceId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   messages Message[]
+  runs     JobRun[]
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, updatedAt])
+  @@index([workspaceId, updatedAt])
 }
 
 enum MessageRole {
@@ -36,10 +43,12 @@ enum MessageType {
 }
 
 model Message {
-  id String @id @default(uuid())
-  content String
-  role MessageRole
-  type MessageType
+  id        String      @id @default(uuid())
+  content   String
+  role      MessageRole
+  type      MessageType
+  runStatus RunStatus?  @default(PENDING)
+  runId     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -47,6 +56,11 @@ model Message {
 
   projectId String
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  run     JobRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([runId, role])
+  @@index([projectId, updatedAt])
 }
 
 model Fragment {
@@ -66,4 +80,95 @@ model Usage {
   key String @id
   points Int
   expire DateTime?
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model JobRun {
+  id            String    @id @default(uuid())
+  projectId     String
+  userId        String
+  input         String
+  status        RunStatus @default(PENDING)
+  errorCode     String?
+  errorMessage  String?
+  summary       String?
+  promptVersion String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project  Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([userId, status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([projectId, status, createdAt])
+}
+
+model Workspace {
+  id        String      @id @default(uuid())
+  name      String
+  ownerId   String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  projects  Project[]
+  members   Membership[]
+  audits    AuditLog[]
+}
+
+model Membership {
+  id          String        @id @default(uuid())
+  workspaceId String
+  userId      String
+  role        MembershipRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId, role])
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  workspaceId String?
+  actorId     String
+  action      String
+  resourceId  String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model PromptMetric {
+  id            String   @id @default(uuid())
+  runId         String?
+  promptVersion String
+  model         String
+  status        RunStatus
+  latencyMs     Int?
+  createdAt     DateTime @default(now())
+
+  @@index([runId, createdAt])
+  @@index([status, createdAt])
+  @@index([promptVersion, createdAt])
 }

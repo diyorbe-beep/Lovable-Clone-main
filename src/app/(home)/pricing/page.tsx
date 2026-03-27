@@ -8,6 +8,7 @@ import { useCurrentTheme } from "@/hooks/use-current-theme";
 
 export default function PricingPage() {
   const currentTheme = useCurrentTheme();
+  const billingEnabled = process.env.NEXT_PUBLIC_CLERK_BILLING_ENABLED === "1";
 
   return (
     <div className="flex flex-col max-w-3xl mx-auto w-full">
@@ -25,14 +26,21 @@ export default function PricingPage() {
             Choose the plan that fits your needs
           </p>
         </div>
-        <PricingTable
-          appearance={{
-            elements: {
-              pricingTableCard: "border! shadow-none! rounded-lg!",
-            },
-            baseTheme: currentTheme === "dark" ? dark : undefined,
-          }}
-        />
+        {billingEnabled ? (
+          <PricingTable
+            appearance={{
+              elements: {
+                pricingTableCard: "border! shadow-none! rounded-lg!",
+              },
+              baseTheme: currentTheme === "dark" ? dark : undefined,
+            }}
+          />
+        ) : (
+          <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+            Billing is not enabled in this environment. Set{" "}
+            <code>NEXT_PUBLIC_CLERK_BILLING_ENABLED=1</code> after configuring Clerk Billing.
+          </div>
+        )}
       </section>
     </div>
   );

@@ -2,9 +2,11 @@ import { auth } from "@clerk/nextjs/server";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { cache } from "react";
 import superjson from "superjson";
+import { randomUUID } from "crypto";
+import { ERROR_CODES } from "@/lib/errors";
 
 export const createTRPCContext = cache(async () => {
-  return { auth: await auth() };
+  return { auth: await auth(), requestId: randomUUID() };
 });
 
 export type Context = Awaited<ReturnType<typeof createTRPCContext>>;
@@ -15,12 +17,16 @@ const t = initTRPC.context<Context>().create({
 
 const isAuthed = t.middleware(({ next, ctx }) => {
   if (!ctx.auth.userId) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: ERROR_CODES.AUTH_REQUIRED,
+    });
   }
 
   return next({
     ctx: {
       auth: ctx.auth,
+      requestId: ctx.requestId,
     },
   });
 });

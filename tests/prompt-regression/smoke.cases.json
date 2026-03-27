@@ -1,0 +1,12 @@
+[
+  {
+    "id": "netflix-home",
+    "prompt": "Build a Netflix-style homepage with a hero banner, movie sections, responsive cards, and modal details in dark mode.",
+    "mustContain": ["hero", "modal", "responsive", "dark"]
+  },
+  {
+    "id": "saas-dashboard",
+    "prompt": "Create a SaaS analytics dashboard with KPI cards, chart placeholders, and a recent activity list.",
+    "mustContain": ["dashboard", "cards", "activity"]
+  }
+]

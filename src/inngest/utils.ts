@@ -9,6 +9,26 @@ export async function getSandbox(sandboxId: string) {
   return sandbox;
 }
 
+export async function cleanupSandbox(sandboxId?: string) {
+  if (!sandboxId) return;
+  try {
+    const sandbox = await Sandbox.connect(sandboxId);
+    const maybe = sandbox as unknown as {
+      close?: () => Promise<void>;
+      kill?: () => Promise<void>;
+    };
+    if (typeof maybe.kill === "function") {
+      await maybe.kill();
+      return;
+    }
+    if (typeof maybe.close === "function") {
+      await maybe.close();
+    }
+  } catch {
+    // best-effort cleanup
+  }
+}
+
 export function lastAssistantTextMessageContent(result: AgentResult) {
   const lastAssistantTextMessageIndex = result.output.findLastIndex(
     (message) => message.role === "assistant"

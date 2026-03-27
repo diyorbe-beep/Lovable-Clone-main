@@ -16,9 +16,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserControl } from "@/components/user-control";
 import { CLERK_PRO_PLAN_CLAIM } from "@/config/billing";
 import { Fragment } from "@/generated/prisma";
+import { useEffectiveProjectRun } from "@/hooks/use-effective-project-run";
 import { FileCollection } from "@/types";
-import { FragmentWeb } from "../components/fragment-web";
 import { MessagesContainer } from "../components/messages-container";
+import { PreviewPanel } from "../components/preview-panel";
 import { ProjectHeader } from "../components/project-header";
 import { ErrorBoundary } from "react-error-boundary";
 
@@ -29,6 +30,7 @@ interface ProjectViewProps {
 const ProjectView = ({ projectId }: ProjectViewProps) => {
   const { has } = useAuth();
   const hasProAccess = has?.({ plan: CLERK_PRO_PLAN_CLAIM });
+  const effectiveRun = useEffectiveProjectRun(projectId);
 
   const [activeFragment, setActiveFragment] = useState<Fragment | null>(null);
   const [tabState, setTabState] = useState<"preview" | "code">("preview");
@@ -52,14 +54,19 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
                 projectId={projectId}
                 activeFragment={activeFragment}
                 setActiveFragment={setActiveFragment}
+                effectiveRun={effectiveRun}
               />
             </Suspense>
           </ErrorBoundary>
         </ResizablePanel>
         <ResizableHandle className="hover:bg-primary transition-colors" />
-        <ResizablePanel defaultSize={65} minSize={50}>
+        <ResizablePanel
+          defaultSize={65}
+          minSize={50}
+          className="flex min-h-0 flex-col"
+        >
           <Tabs
-            className="h-full gap-y-0"
+            className="flex h-full min-h-0 flex-col gap-y-0"
             defaultValue="preview"
             value={tabState}
             onValueChange={(newValue) =>
@@ -89,8 +96,15 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
                 <UserControl />
               </div>
             </div>
-            <TabsContent value="preview">
-              {!!activeFragment && <FragmentWeb data={activeFragment} />}
+            <TabsContent
+              value="preview"
+              className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
+            >
+              <PreviewPanel
+                activeFragment={activeFragment}
+                runStatus={effectiveRun?.status}
+                errorMessage={effectiveRun?.errorMessage}
+              />
             </TabsContent>
             <TabsContent value="code" className="min-h-0">
               {!!activeFragment?.files && (
