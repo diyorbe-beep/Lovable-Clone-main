@@ -37,7 +37,33 @@ const Navbar = () => {
           </div>
         </SignedOut>
         <SignedIn>
-          <UserControl showName />
+          <div className="flex items-center gap-3 text-sm">
+            <Link
+              href="/projects"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Projects
+            </Link>
+            <Link
+              href="/settings"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Settings
+            </Link>
+            <Link
+              href="/billing"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Usage
+            </Link>
+            <Link
+              href="/pricing"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Pricing
+            </Link>
+            <UserControl showName />
+          </div>
         </SignedIn>
       </div>
     </nav>

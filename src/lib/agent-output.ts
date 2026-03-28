@@ -58,9 +58,25 @@ const outputSchema = z.object({
   files: filesSchema,
 });
 
+export type ValidAgentOutput = z.infer<typeof outputSchema>;
+
 export function validateAgentOutput(input: {
   summary: string;
   files: FileCollection;
-}) {
+}): ValidAgentOutput {
   return outputSchema.parse(input);
+}
+
+export function safeParseAgentOutput(input: {
+  summary: string;
+  files: FileCollection;
+}):
+  | { ok: true; data: ValidAgentOutput }
+  | { ok: false; errorText: string } {
+  const r = outputSchema.safeParse(input);
+  if (r.success) return { ok: true, data: r.data };
+  const errorText = r.error.issues
+    .map((i) => `${i.path.join(".") || "output"}: ${i.message}`)
+    .join("\n");
+  return { ok: false, errorText };
 }

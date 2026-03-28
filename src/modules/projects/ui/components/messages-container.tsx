@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
-import { Fragment, RunStatus } from "@/generated/prisma";
+import { Fragment } from "@/generated/prisma";
+import type { EffectiveProjectRun } from "@/hooks/use-effective-project-run";
+import type { RunProgressJson } from "@/lib/run-progress";
 import { useTRPC } from "@/trpc/client";
 import { MessageCard } from "./message-card";
 import { MessageForm } from "./message-form";
@@ -12,11 +14,9 @@ interface MessagesContainerProps {
   projectId: string;
   activeFragment: Fragment | null;
   setActiveFragment: (activeFragment: Fragment | null) => void;
-  effectiveRun: {
-    id: string;
-    status: RunStatus;
-    errorMessage?: string | null;
-  } | null;
+  effectiveRun: EffectiveProjectRun;
+  visualPrefillPath?: string | null;
+  onVisualPrefillConsumed?: () => void;
 }
 
 const MessagesContainer = ({
@@ -24,6 +24,8 @@ const MessagesContainer = ({
   effectiveRun,
   projectId,
   setActiveFragment,
+  visualPrefillPath,
+  onVisualPrefillConsumed,
 }: MessagesContainerProps) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastAssistantMessageIdRef = useRef<string | null>(null);
@@ -41,7 +43,7 @@ const MessagesContainer = ({
       {
         refetchOnWindowFocus: true,
         staleTime: 2000,
-        refetchInterval: isRunActive ? 2500 : false,
+        refetchInterval: isRunActive ? 1100 : false,
       },
     ),
   );
@@ -103,8 +105,8 @@ const MessagesContainer = ({
   }, [messages, setActiveFragment]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView();
-  }, [messages?.length]);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages?.length, effectiveRun?.progress, effectiveRun?.status]);
 
   const isLastMessageUser =
     effectiveRun?.status === "PENDING" || effectiveRun?.status === "RUNNING";
@@ -126,11 +128,24 @@ const MessagesContainer = ({
             />
           ))}
 
-          {isLastMessageUser && <MessageLoading />}
+          {isLastMessageUser && (
+            <MessageLoading
+              progress={
+                (effectiveRun?.progress as RunProgressJson | null | undefined) ??
+                null
+              }
+            />
+          )}
           <RunStatusBanner
             runId={effectiveRun?.id}
             status={effectiveRun?.status}
             errorMessage={effectiveRun?.errorMessage}
+            progressLabel={
+              (effectiveRun?.progress as RunProgressJson | undefined)?.label
+            }
+            progressDetail={
+              (effectiveRun?.progress as RunProgressJson | undefined)?.detail
+            }
             onCancel={(runId) => cancelRun.mutate({ runId })}
             onRetry={(runId) => retryRun.mutate({ runId })}
             busy={cancelRun.isPending || retryRun.isPending}
@@ -142,7 +157,11 @@ const MessagesContainer = ({
 
       <div className="relative p-3 pt-1">
         <div className="absolute -top-6 left-0 right-0 h-6 bg-gradient-to-b from-transparent to-background pointer-events-none" />
-        <MessageForm projectId={projectId} />
+        <MessageForm
+          projectId={projectId}
+          prefillTargetPath={visualPrefillPath ?? undefined}
+          onPrefillTargetConsumed={onVisualPrefillConsumed}
+        />
       </div>
     </div>
   );

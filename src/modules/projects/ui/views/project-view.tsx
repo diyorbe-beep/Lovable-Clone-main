@@ -1,9 +1,9 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { CodeIcon, CrownIcon, EyeIcon } from "lucide-react";
+import { CodeIcon, CrownIcon, EyeIcon, Loader2Icon } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 
 import { FileExplorer } from "@/components/file-explorer";
 import { Button } from "@/components/ui/button";
@@ -17,11 +17,14 @@ import { UserControl } from "@/components/user-control";
 import { CLERK_PRO_PLAN_CLAIM } from "@/config/billing";
 import { Fragment } from "@/generated/prisma";
 import { useEffectiveProjectRun } from "@/hooks/use-effective-project-run";
+import type { RunProgressJson } from "@/lib/run-progress";
 import { FileCollection } from "@/types";
 import { MessagesContainer } from "../components/messages-container";
 import { PreviewPanel } from "../components/preview-panel";
 import { ProjectHeader } from "../components/project-header";
+import { ProjectShipPanel } from "../components/project-ship-panel";
 import { ErrorBoundary } from "react-error-boundary";
+import { useSearchParams } from "next/navigation";
 
 interface ProjectViewProps {
   projectId: string;
@@ -31,9 +34,65 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
   const { has } = useAuth();
   const hasProAccess = has?.({ plan: CLERK_PRO_PLAN_CLAIM });
   const effectiveRun = useEffectiveProjectRun(projectId);
+  const runProgress =
+    (effectiveRun?.progress as RunProgressJson | null | undefined) ?? null;
+  const isRunGenerating =
+    effectiveRun?.status === "PENDING" || effectiveRun?.status === "RUNNING";
 
   const [activeFragment, setActiveFragment] = useState<Fragment | null>(null);
+
+  const optimisticPreviewFragment = useMemo((): Fragment | null => {
+    if (!isRunGenerating || !runProgress?.previewSandboxUrl) return null;
+    const fromFragment =
+      activeFragment?.files && typeof activeFragment.files === "object"
+        ? (activeFragment.files as FileCollection)
+        : {};
+    const fromProgress = runProgress.partialPreview ?? {};
+    const files = { ...fromFragment, ...fromProgress };
+    return {
+      id: "__run-preview__",
+      messageId: "__run-preview__",
+      sandboxUrl: runProgress.previewSandboxUrl,
+      title: "Building…",
+      files,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    } as Fragment;
+  }, [
+    activeFragment?.files,
+    isRunGenerating,
+    runProgress?.partialPreview,
+    runProgress?.previewSandboxUrl,
+  ]);
+
+  const previewFragment = optimisticPreviewFragment ?? activeFragment;
+
+  const codeTabFiles = useMemo((): FileCollection => {
+    const base =
+      activeFragment?.files && typeof activeFragment.files === "object"
+        ? (activeFragment.files as FileCollection)
+        : {};
+    if (isRunGenerating && runProgress?.partialPreview) {
+      return { ...base, ...runProgress.partialPreview };
+    }
+    return base;
+  }, [
+    activeFragment?.files,
+    isRunGenerating,
+    runProgress?.partialPreview,
+  ]);
   const [tabState, setTabState] = useState<"preview" | "code">("preview");
+  const [shipOpen, setShipOpen] = useState(false);
+  const [visualPrefillPath, setVisualPrefillPath] = useState<string | null>(
+    null,
+  );
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get("ship") === "github") {
+      setShipOpen(true);
+    }
+  }, [searchParams]);
 
   return (
     <div className="h-screen">
@@ -45,7 +104,10 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
         >
           <ErrorBoundary fallback={<p>Error...</p>}>
             <Suspense fallback={<p>Loading project...</p>}>
-              <ProjectHeader projectId={projectId} />
+              <ProjectHeader
+                projectId={projectId}
+                onOpenShip={() => setShipOpen(true)}
+              />
             </Suspense>
           </ErrorBoundary>
           <ErrorBoundary fallback={<p>Error...</p>}>
@@ -55,6 +117,8 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
                 activeFragment={activeFragment}
                 setActiveFragment={setActiveFragment}
                 effectiveRun={effectiveRun}
+                visualPrefillPath={visualPrefillPath}
+                onVisualPrefillConsumed={() => setVisualPrefillPath(null)}
               />
             </Suspense>
           </ErrorBoundary>
@@ -101,19 +165,60 @@ const ProjectView = ({ projectId }: ProjectViewProps) => {
               className="mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
             >
               <PreviewPanel
-                activeFragment={activeFragment}
+                activeFragment={previewFragment}
                 runStatus={effectiveRun?.status}
                 errorMessage={effectiveRun?.errorMessage}
+                progress={runProgress}
+                onVisualPick={({ path }) => {
+                  setVisualPrefillPath(path);
+                  setTabState("preview");
+                }}
               />
             </TabsContent>
-            <TabsContent value="code" className="min-h-0">
-              {!!activeFragment?.files && (
-                <FileExplorer files={activeFragment.files as FileCollection} />
+            <TabsContent
+              value="code"
+              className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
+            >
+              {Object.keys(codeTabFiles).length > 0 ? (
+                <FileExplorer files={codeTabFiles} />
+              ) : isRunGenerating ? (
+                <div className="flex min-h-[280px] flex-col justify-center gap-3 border bg-muted/15 p-6 text-center text-sm">
+                  <Loader2Icon className="text-primary mx-auto size-8 animate-spin" />
+                  <p className="text-foreground font-medium">
+                    {runProgress?.label ?? "Updating codebase…"}
+                  </p>
+                  {runProgress?.changedPaths?.length ? (
+                    <ul className="text-muted-foreground mx-auto max-h-44 max-w-lg list-inside list-disc overflow-y-auto text-left font-mono text-[11px]">
+                      {runProgress.changedPaths.map((p) => (
+                        <li key={p} className="truncate">
+                          {p}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-muted-foreground px-4 text-xs">
+                      Patched paths will list here as the agent writes files.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="text-muted-foreground flex min-h-[200px] items-center justify-center p-6 text-center text-sm">
+                  No code yet. Finish a generation or open a version from Ship.
+                </div>
               )}
             </TabsContent>
           </Tabs>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <ProjectShipPanel
+        projectId={projectId}
+        open={shipOpen}
+        onOpenChange={setShipOpen}
+        onSelectFragment={(fragment) => {
+          setActiveFragment(fragment);
+          setTabState("preview");
+        }}
+      />
     </div>
   );
 };

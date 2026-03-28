@@ -133,7 +133,7 @@ const ProjectForm = () => {
           </div>
         </form>
 
-        <div className="flex-wrap justify-center gap-2 hidden md:flex max-w-3xl">
+        <div className="flex max-w-3xl flex-wrap justify-center gap-2">
           {PROJECT_TEMPLATES.map((template) => (
             <Button
               key={template.title}

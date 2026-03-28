@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 
 import prisma from "@/lib/prisma";
+import { ensureAppUser } from "@/lib/user-sync";
 
 const encoder = new TextEncoder();
 
@@ -8,14 +9,17 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  const { userId } = await auth();
-  if (!userId) {
+  const { userId: clerkUserId } = await auth();
+  if (!clerkUserId) {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  const appUser = await ensureAppUser(clerkUserId);
+
   const { projectId } = await params;
-  const project = await prisma.project.findUnique({
-    where: { id: projectId, userId },
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId: appUser.id },
+    select: { id: true },
   });
 
   if (!project) {
@@ -35,15 +39,16 @@ export async function GET(
 
       interval = setInterval(async () => {
         try {
-          const latestRun = await prisma.jobRun.findFirst({
-            where: { projectId, userId },
-            orderBy: { createdAt: "desc" },
-          });
-          send("run", latestRun ?? null);
+          const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+            `SELECT * FROM "JobRun" WHERE "projectId" = $1 AND "userId" = $2 ORDER BY "createdAt" DESC LIMIT 1`,
+            projectId,
+            appUser.id,
+          );
+          send("run", rows[0] ?? null);
         } catch {
           send("error", { message: "stream_failed" });
         }
-      }, 1200);
+      }, 400);
 
     },
     cancel() {

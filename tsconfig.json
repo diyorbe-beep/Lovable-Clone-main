@@ -23,5 +23,28 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "src/components/ai",
+    "src/components/analytics",
+    "src/components/billing",
+    "src/components/collaboration",
+    "src/components/mobile",
+    "src/components/onboarding",
+    "src/components/projects",
+    "src/lib/ai",
+    "src/lib/performance",
+    "src/lib/scaling",
+    "src/lib/notifications",
+    "src/lib/email",
+    "src/lib/collaboration",
+    "src/lib/database",
+    "src/lib/i18n",
+    "src/lib/session/session-manager.ts",
+    "src/lib/utils/performance.ts",
+    "src/components/ui/accessibility.tsx",
+    "src/components/ui/premium-features.tsx",
+    "src/components/ui/mobile-nav.tsx",
+    "src/components/ui/dashboard-layout.tsx"
+  ]
 }

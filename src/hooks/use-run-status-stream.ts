@@ -7,6 +7,7 @@ export interface RunStreamPayload {
   id: string;
   status: RunStatus;
   errorMessage?: string | null;
+  progress?: unknown;
 }
 
 export function useRunStatusStream(projectId: string) {

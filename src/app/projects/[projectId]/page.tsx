@@ -19,6 +19,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   void queryClient.prefetchQuery(
     trpc.messages.getMany.queryOptions({ projectId })
   );
+  void queryClient.prefetchQuery(trpc.integrations.githubStatus.queryOptions());
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>

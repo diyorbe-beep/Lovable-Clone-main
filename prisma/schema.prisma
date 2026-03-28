@@ -14,6 +14,35 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id            String    @id @default(uuid())
+  clerkId       String    @unique
+  email         String?
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  projects      Project[]
+  jobRuns       JobRun[]
+  workspaces    Workspace[]
+  memberships   Membership[]
+  auditLogs     AuditLog[]
+  subscription  Subscription?
+  usageRecords  UsageRecord[]
+}
+
+/** Encrypted GitHub OAuth token; encryption key = INTEGRATION_ENCRYPTION_KEY */
+model GitHubIntegration {
+  id             String   @id @default(uuid())
+  clerkUserId    String   @unique
+  githubLogin    String
+  accessTokenEnc String
+  scope          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 model Project {
   id          String  @id @default(uuid())
   name        String
@@ -23,13 +52,68 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  messages Message[]
-  runs     JobRun[]
+  messages  Message[]
+  runs      JobRun[]
+  memories  ProjectMemory[]
+  snapshots ProjectSnapshot[]
+  hostedEnv HostedProjectEnvironment?
 
+  user     User @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
   @@index([userId, updatedAt])
   @@index([workspaceId, updatedAt])
+}
+
+/** Long-lived hints: style, conventions, last patterns — injected into agent context. */
+model ProjectMemory {
+  id        String   @id @default(uuid())
+  projectId String
+  key       String
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])
+  @@index([projectId, updatedAt])
+}
+
+/** Time-travel snapshots (files + preview URL from run). */
+model ProjectSnapshot {
+  id          String   @id @default(uuid())
+  projectId String
+  label       String
+  files       Json
+  sandboxUrl  String?
+  sourceRunId String?
+  summaryLine String?
+  createdAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+}
+
+/** Isolated Postgres schema + hosted metadata per app project (zero-setup cloud). */
+model HostedProjectEnvironment {
+  id                     String   @id @default(uuid())
+  projectId              String   @unique
+  postgresSchema         String
+  status                 String   @default("active")
+  lastError              String?
+  publicSupabaseUrl      String?
+  encryptedPublicAnonKey String?
+  persistentPreviewUrl   String?
+  vercelDeploymentUrl    String?
+  lastProvisionedAt      DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([postgresSchema])
 }
 
 enum MessageRole {
@@ -69,6 +153,8 @@ model Fragment {
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   sandboxUrl String
+  /** Long-lived preview (Vercel / static host) when sandbox expires */
+  persistentPreviewUrl String?
   title String
   files Json
 
@@ -99,6 +185,10 @@ model JobRun {
   errorCode     String?
   errorMessage  String?
   summary       String?
+  /** Live progress for streaming UI (phase, streamText, changedPaths, …) */
+  progress      Json?
+  /** Ephemeral run input (e.g. vision screenshot) — read by worker then cleared */
+  inputContext  Json?
   promptVersion String?
   startedAt     DateTime?
   finishedAt    DateTime?
@@ -106,6 +196,7 @@ model JobRun {
   updatedAt     DateTime  @updatedAt
 
   project  Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages Message[]
 
   @@index([userId, status, createdAt])
@@ -122,6 +213,8 @@ model Workspace {
   projects  Project[]
   members   Membership[]
   audits    AuditLog[]
+
+  owner     User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 }
 
 model Membership {
@@ -133,6 +226,7 @@ model Membership {
   updatedAt   DateTime      @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
   @@index([userId, role])
@@ -154,6 +248,7 @@ model AuditLog {
   createdAt   DateTime @default(now())
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  actor     User       @relation(fields: [actorId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, createdAt])
   @@index([actorId, createdAt])
@@ -171,4 +266,151 @@ model PromptMetric {
   @@index([runId, createdAt])
   @@index([status, createdAt])
   @@index([promptVersion, createdAt])
+}
+
+// ===== BILLING MODELS =====
+
+model Subscription {
+  id                String              @id @default(uuid())
+  userId            String              @unique
+  stripeCustomerId  String              @unique
+  stripeSubscriptionId String?          @unique
+  status            SubscriptionStatus  @default(INACTIVE)
+  planId            String
+  priceId           String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd Boolean             @default(false)
+  trialStart        DateTime?
+  trialEnd          DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoices          Invoice[]
+  paymentMethods    PaymentMethod[]
+
+  @@index([userId, status])
+  @@index([status, currentPeriodEnd])
+}
+
+model Invoice {
+  id                String      @id @default(uuid())
+  subscriptionId    String
+  stripeInvoiceId  String      @unique
+  status            InvoiceStatus
+  amount            Int
+  currency          String      @default("usd")
+  dueDate           DateTime?
+  paidAt            DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  subscription      Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  items             InvoiceItem[]
+
+  @@index([subscriptionId, status])
+  @@index([status, dueDate])
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  amount      Int
+  quantity    Int
+  currency    String  @default("usd")
+  createdAt   DateTime @default(now())
+
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model PaymentMethod {
+  id              String            @id @default(uuid())
+  subscriptionId  String
+  stripePaymentMethodId String      @unique
+  type            PaymentMethodType
+  brand           String?
+  last4           String?
+  expMonth        Int?
+  expYear         Int?
+  isDefault       Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, isDefault])
+}
+
+model UsageRecord {
+  id            String      @id @default(uuid())
+  userId        String
+  subscriptionId String?
+  type          UsageType
+  amount        Int
+  metadata      Json?
+  periodStart   DateTime
+  periodEnd     DateTime
+  createdAt     DateTime    @default(now())
+
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, periodStart, periodEnd])
+  @@index([subscriptionId, type, periodStart])
+}
+
+model BillingPlan {
+  id            String      @id @default(uuid())
+  name          String
+  description   String
+  stripePriceId String     @unique
+  price         Int
+  currency      String      @default("usd")
+  interval      BillingInterval
+  features      Json
+  isActive      Boolean     @default(true)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INACTIVE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum PaymentMethodType {
+  CARD
+  BANK_ACCOUNT
+  US_BANK_ACCOUNT
+}
+
+enum UsageType {
+  GENERATION
+  API_CALL
+  STORAGE
+  BANDWIDTH
+  SEAT
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
 }

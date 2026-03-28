@@ -1,4 +1,25 @@
+/** Must match the agent pipeline in `src/inngest/functions.ts`. */
+export const AGENT_PROMPT_VERSION = "v6-hosted-stream-bridge" as const;
+
 export const PROJECT_TEMPLATES = [
+  {
+    emoji: "🛬",
+    title: "Landing page",
+    prompt:
+      "Build a modern marketing landing page: hero with headline and CTA, feature grid, social proof section, pricing teaser, FAQ, and footer. Use Tailwind only, responsive layout, and polished typography.",
+  },
+  {
+    emoji: "📊",
+    title: "Analytics dashboard",
+    prompt:
+      "Build a compact analytics dashboard: sidebar nav, KPI stat cards, simple chart placeholder, recent activity table with filters, and dark-friendly styling. Use local mock data.",
+  },
+  {
+    emoji: "💳",
+    title: "SaaS starter",
+    prompt:
+      "Build a minimal SaaS app shell: marketing header, sign-in CTA placeholders, dashboard layout with sidebar, empty state, and settings-style panel using mock data only.",
+  },
   {
     emoji: "🎬",
     title: "Build a Netflix clone",

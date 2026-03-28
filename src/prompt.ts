@@ -73,6 +73,12 @@ Shadcn UI dependencies — including radix-ui, lucide-react, class-variance-auth
   - The "cn" utility MUST always be imported from "@/lib/utils"
   Example: import { cn } from "@/lib/utils"
 
+Patch-first workflow (critical):
+- The sandbox may already contain files from the user's last build. Prefer EDITING existing files with createOrUpdateFiles — pass only files you touch.
+- Do NOT regenerate the entire app tree unless the user explicitly asked for a full rewrite.
+- When changing behavior, update the smallest set of files (usually app/page.tsx and nearby components).
+- Preserve filenames, routes, and structure unless a refactor is required.
+
 Additional Guidelines:
 - Think step-by-step before coding
 - You MUST use the createOrUpdateFiles tool to make all file changes
@@ -110,6 +116,26 @@ File conventions:
 - Types/interfaces should be PascalCase in kebab-case files
 - Components should be using named exports
 - When using Shadcn components, import them from their proper individual file paths (e.g. @/components/ui/input)
+
+Full-stack in this sandbox:
+- Prefer Next.js Route Handlers: create \`app/api/<resource>/route.ts\` exporting GET/POST/PATCH/DELETE with JSON \`Response.json(...)\`.
+- Keep fetch URLs relative (e.g. \`/api/tasks\`) from client components.
+- For persistence without a real DB, use in-memory maps inside route handlers or read/write a JSON file under \`data/\` via \`fs\` in Node route handlers only — note \`runtime = 'nodejs'\` if using fs.
+- Do NOT reference Prisma, PlanetScale, or external DB SDKs unless the user already added them via terminal.
+- Mirror types: share TypeScript interfaces in \`app/lib/types.ts\` or colocated \`types.ts\` and use them in both UI and API.
+
+Automated tests:
+- For non-trivial logic, add Vitest tests alongside code (e.g. \`app/lib/foo.test.ts\` or \`__tests__/foo.test.ts\`) using \`import { describe, it, expect } from 'vitest'\`.
+- Keep tests fast and deterministic (no network).
+
+Visual editing / element mapping:
+- On major interactive regions, set \`data-dev-source="<relative-path>"\` on the outermost wrapper (e.g. \`data-dev-source="app/page.tsx"\`) so the product UI can map clicks to files.
+- Use the exact relative path you used in createOrUpdateFiles.
+- You MUST load the platform bridge script from HOSTED_PLATFORM.md (appends to app/layout.tsx <body>): \`<script async src="{NEXT_PUBLIC_APP_URL}/api/preview/bridge?parent=..."></script>\` using the origin given in agent context.
+
+Real persistence (hosted schema):
+- When a hosted Postgres schema name is provided, create durable tables with \`CREATE TABLE IF NOT EXISTS schema.table\` using raw SQL from Route Handlers (\`pg\` or \`@vercel/postgres\`) after \`SET search_path\`.
+- Keep SQL migrations in \`db/migrations/*.sql\` strings for traceability.
 
 Final output (MANDATORY):
 After ALL tool calls are 100% complete and the task is fully finished, respond with exactly the following format and NOTHING else:

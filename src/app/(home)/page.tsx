@@ -1,12 +1,16 @@
 import { SignedIn } from "@clerk/nextjs";
 import Image from "next/image";
 
+import { PlatformSetupBanner } from "@/components/platform-setup-banner";
 import { ProjectForm } from "@/modules/home/ui/components/project-form";
 import { ProjectsList } from "@/modules/home/ui/components/projects-list";
 
 export default function HomePage() {
   return (
     <div className="flex flex-col max-w-5xl mx-auto w-full">
+      <div className="px-4 pt-6 md:pt-10">
+        <PlatformSetupBanner />
+      </div>
       <section className="space-y-6 py-[16vh] 2xl:py-48">
         <div className="flex flex-col items-center">
           <Image

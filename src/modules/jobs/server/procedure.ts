@@ -9,25 +9,25 @@ import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 export const jobsRouter = createTRPCRouter({
   health: protectedProcedure.query(async ({ ctx }) => {
-    await expireStaleRunsForUser(ctx.auth.userId);
+    await expireStaleRunsForUser(ctx.appUser!.id);
 
     const staleThreshold = new Date(Date.now() - 8 * 60 * 1000);
     const [runningCount, staleCount, lastRun] = await Promise.all([
       prisma.jobRun.count({
         where: {
-          userId: ctx.auth.userId,
+          userId: ctx.appUser!.id,
           status: { in: ["PENDING", "RUNNING"] },
         },
       }),
       prisma.jobRun.count({
         where: {
-          userId: ctx.auth.userId,
+          userId: ctx.appUser!.id,
           status: { in: ["PENDING", "RUNNING"] },
           createdAt: { lt: staleThreshold },
         },
       }),
       prisma.jobRun.findFirst({
-        where: { userId: ctx.auth.userId },
+        where: { userId: ctx.appUser!.id },
         orderBy: { createdAt: "desc" },
       }),
     ]);
@@ -47,19 +47,14 @@ export const jobsRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input, ctx }) => {
-      await expireStaleRunsForUser(ctx.auth.userId, input.projectId);
+      await expireStaleRunsForUser(ctx.appUser!.id, input.projectId);
 
-      const run = await prisma.jobRun.findFirst({
-        where: {
-          projectId: input.projectId,
-          userId: ctx.auth.userId,
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-
-      return run;
+      const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT * FROM "JobRun" WHERE "projectId" = $1 AND "userId" = $2 ORDER BY "createdAt" DESC LIMIT 1`,
+        input.projectId,
+        ctx.appUser!.id,
+      );
+      return (rows[0] ?? null) as (typeof rows)[0] | null;
     }),
   cancel: protectedProcedure
     .input(
@@ -69,7 +64,7 @@ export const jobsRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const run = await prisma.jobRun.findFirst({
-        where: { id: input.runId, userId: ctx.auth.userId },
+        where: { id: input.runId, userId: ctx.appUser!.id },
       });
 
       if (!run) {
@@ -120,7 +115,7 @@ export const jobsRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const oldRun = await prisma.jobRun.findFirst({
-        where: { id: input.runId, userId: ctx.auth.userId },
+        where: { id: input.runId, userId: ctx.appUser!.id },
       });
 
       if (!oldRun) {
@@ -130,7 +125,7 @@ export const jobsRouter = createTRPCRouter({
       const activeRun = await prisma.jobRun.findFirst({
         where: {
           projectId: oldRun.projectId,
-          userId: ctx.auth.userId,
+          userId: ctx.appUser!.id,
           status: { in: ["PENDING", "RUNNING"] },
         },
       });
@@ -178,7 +173,7 @@ export const jobsRouter = createTRPCRouter({
           level: "error",
           message: "jobs.retry dispatch failed",
           requestId: ctx.requestId,
-          userId: ctx.auth.userId,
+          userId: ctx.appUser!.id,
           projectId: oldRun.projectId,
           runId: newRun.id,
           code: ERROR_CODES.INNGEST_DISPATCH_FAILED,

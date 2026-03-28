@@ -1,5 +1,6 @@
 import prisma from "./prisma";
 
+/** @param userId internal `User.id` (UUID), not the Clerk subject */
 export async function ensureDefaultWorkspace(userId: string) {
   const existing = await prisma.membership.findFirst({
     where: { userId },

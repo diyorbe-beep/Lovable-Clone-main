@@ -13,26 +13,50 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTRPC } from "@/trpc/client";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, ChevronLeftIcon, SunMoonIcon } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  CopyIcon,
+  RocketIcon,
+  SunMoonIcon,
+} from "lucide-react";
 import { useTheme } from "next-themes";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 interface ProjectHeaderProps {
   projectId: string;
+  onOpenShip?: () => void;
 }
 
-const ProjectHeader = ({ projectId }: ProjectHeaderProps) => {
+const ProjectHeader = ({ projectId, onOpenShip }: ProjectHeaderProps) => {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const router = useRouter();
   const { data: project } = useQuery(
     trpc.projects.getOne.queryOptions({ id: projectId })
+  );
+
+  const duplicate = useMutation(
+    trpc.projects.duplicate.mutationOptions({
+      onSuccess: (data) => {
+        void queryClient.invalidateQueries(trpc.projects.getMany.queryOptions());
+        toast.success("Remix created — opening…");
+        router.push(`/projects/${data.id}`);
+      },
+      onError: (err) => {
+        toast.error(err.message || "Could not duplicate project.");
+      },
+    }),
   );
 
   const { setTheme, theme } = useTheme();
 
   return (
-    <header className="p-2 flex justify-between items-center border-b">
+    <header className="p-2 flex justify-between items-center border-b gap-2">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -47,10 +71,19 @@ const ProjectHeader = ({ projectId }: ProjectHeaderProps) => {
         </DropdownMenuTrigger>
         <DropdownMenuContent side="bottom" align="start">
           <DropdownMenuItem asChild>
-            <Link href="/">
+            <Link href="/projects">
               <ChevronLeftIcon />
-              <span>Go to Dashboard</span>
+              <span>All projects</span>
             </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={duplicate.isPending}
+            onSelect={() => {
+              duplicate.mutate({ sourceProjectId: projectId });
+            }}
+          >
+            <CopyIcon />
+            <span>Remix project</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuSub>
@@ -76,6 +109,18 @@ const ProjectHeader = ({ projectId }: ProjectHeaderProps) => {
           </DropdownMenuSub>
         </DropdownMenuContent>
       </DropdownMenu>
+      {onOpenShip ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="ml-auto shrink-0 gap-1.5"
+          onClick={onOpenShip}
+        >
+          <RocketIcon className="size-4" />
+          Ship
+        </Button>
+      ) : null}
     </header>
   );
 };

@@ -1,12 +1,22 @@
 import { inngest } from "@/inngest/client";
 import { env } from "@/config/env";
 
-type DispatchPayload = {
+import type { CodeAgentProviderId } from "@/constants/agent-code";
+import { getDefaultCodeAgentRouting } from "@/lib/agent/code-agent-routing";
+import type { FileCollection } from "@/types";
+
+export type DispatchPayload = {
   value: string;
   projectId: string;
   runId: string;
   userId: string;
   requestId: string;
+  runMode?: "debug";
+  visualTarget?: { path: string; selector?: string };
+  previousFilesOverride?: FileCollection;
+  /** When both set, overrides env default routing for this run */
+  agentProvider?: CodeAgentProviderId;
+  agentModel?: string;
 };
 
 async function isLocalInngestReachable() {
@@ -31,8 +41,22 @@ export async function dispatchCodeAgentRun(data: DispatchPayload) {
     }
   }
 
+  const preset =
+    data.agentProvider &&
+    typeof data.agentModel === "string" &&
+    data.agentModel.trim()
+      ? {
+          provider: data.agentProvider,
+          model: data.agentModel.trim(),
+        }
+      : getDefaultCodeAgentRouting();
+
   await inngest.send({
     name: "code-agent/run",
-    data,
+    data: {
+      ...data,
+      provider: preset.provider,
+      model: preset.model,
+    } as Record<string, unknown>,
   });
 }

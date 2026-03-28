@@ -5,6 +5,9 @@ interface RunStatusBannerProps {
   runId?: string;
   status?: RunStatus;
   errorMessage?: string | null;
+  /** Live step label from JobRun.progress (streaming UX) */
+  progressLabel?: string | null;
+  progressDetail?: string | null;
   onRetry?: (runId: string) => void;
   onCancel?: (runId: string) => void;
   busy?: boolean;
@@ -22,6 +25,8 @@ const RunStatusBanner = ({
   runId,
   status,
   errorMessage,
+  progressLabel,
+  progressDetail,
   onRetry,
   onCancel,
   busy,
@@ -37,7 +42,14 @@ const RunStatusBanner = ({
         isError ? "border-red-400 text-red-700 dark:text-red-400" : "border-border text-muted-foreground"
       }`}
     >
-      {textByStatus[status]}
+      <span className="font-medium text-foreground">{textByStatus[status]}</span>
+      {(status === "PENDING" || status === "RUNNING") &&
+      (progressLabel || progressDetail) ? (
+        <span className="mt-1 block text-muted-foreground">
+          {progressLabel ? `${progressLabel}` : ""}
+          {progressDetail ? ` — ${progressDetail}` : ""}
+        </span>
+      ) : null}
       {errorMessage ? `: ${errorMessage}` : ""}
       <div className="mt-2 flex gap-2">
         {(status === "FAILED" || status === "CANCELLED") && runId && onRetry && (

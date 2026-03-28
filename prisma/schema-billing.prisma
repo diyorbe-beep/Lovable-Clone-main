@@ -1,0 +1,144 @@
+// Billing models to add to existing schema
+
+model Subscription {
+  id                String              @id @default(uuid())
+  userId            String              @unique
+  stripeCustomerId  String              @unique
+  stripeSubscriptionId String?          @unique
+  status            SubscriptionStatus  @default(INACTIVE)
+  planId            String
+  priceId           String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd Boolean             @default(false)
+  trialStart        DateTime?
+  trialEnd          DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoices          Invoice[]
+  paymentMethods    PaymentMethod[]
+
+  @@index([userId, status])
+  @@index([status, currentPeriodEnd])
+}
+
+model Invoice {
+  id                String      @id @default(uuid())
+  subscriptionId    String
+  stripeInvoiceId  String      @unique
+  status            InvoiceStatus
+  amount            Int
+  currency          String      @default("usd")
+  dueDate           DateTime?
+  paidAt            DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  subscription      Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  items             InvoiceItem[]
+
+  @@index([subscriptionId, status])
+  @@index([status, dueDate])
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  amount      Int
+  quantity    Int
+  currency    String  @default("usd")
+  createdAt   DateTime @default(now())
+
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model PaymentMethod {
+  id              String            @id @default(uuid())
+  subscriptionId  String
+  stripePaymentMethodId String      @unique
+  type            PaymentMethodType
+  brand           String?
+  last4           String?
+  expMonth        Int?
+  expYear         Int?
+  isDefault       Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, isDefault])
+}
+
+model UsageRecord {
+  id            String      @id @default(uuid())
+  userId        String
+  subscriptionId String?
+  type          UsageType
+  amount        Int
+  metadata      Json?
+  periodStart   DateTime
+  periodEnd     DateTime
+  createdAt     DateTime    @default(now())
+
+  @@index([userId, periodStart, periodEnd])
+  @@index([subscriptionId, type, periodStart])
+}
+
+model BillingPlan {
+  id            String      @id @default(uuid())
+  name          String
+  description   String
+  stripePriceId String     @unique
+  price         Int
+  currency      String      @default("usd")
+  interval      BillingInterval
+  features      Json
+  isActive      Boolean     @default(true)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  INACTIVE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum PaymentMethodType {
+  CARD
+  BANK_ACCOUNT
+  US_BANK_ACCOUNT
+}
+
+enum UsageType {
+  GENERATION
+  API_CALL
+  STORAGE
+  BANDWIDTH
+  SEAT
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+}
